@@ -54,7 +54,8 @@ using namespace o2::framework;
 using namespace o2::framework::expressions;
 using std::array;
 using namespace extConfPar;
-//
+using o2::constants::math::TwoPI;
+using o2::constants::math::PI;
 //
 struct qaMatchEff {
   int lastRunNumber = -1;
