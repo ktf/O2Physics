@@ -3219,9 +3219,9 @@ struct HfTrackIndexSkimCreatorCascades {
             registry.fill(HIST("hMassLcToPK0S"), mass2K0sP);
           }
         } // loop over V0s
-      } // loop over tracks
-    } // loop over collisions
-  } // processCascades
+      }   // loop over tracks
+    }     // loop over collisions
+  }       // processCascades
   PROCESS_SWITCH(HfTrackIndexSkimCreatorCascades, processCascades, "Skim HF -> V0 cascades", false);
 };
 
@@ -3740,12 +3740,12 @@ struct HfTrackIndexSkimCreatorLfCascades {
               }
 
             } // end 3prong loop
-          } // end 3prong condition
+          }   // end 3prong condition
 
         } // loop over pion
-      } // loop over cascade
-    } // loop over collisions
-  } // processLfCascades
+      }   // loop over cascade
+    }     // loop over collisions
+  }       // processLfCascades
 
   PROCESS_SWITCH(HfTrackIndexSkimCreatorLfCascades, processLfCascades, "Skim HF -> LF cascade + bachelor", false);
 };
