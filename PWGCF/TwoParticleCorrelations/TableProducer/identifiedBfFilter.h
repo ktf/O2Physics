@@ -517,8 +517,7 @@ inline float extractMultiplicity(CollisionObject const& collision, CentMultEstim
 //////////////////////////////////////////////////////////////////////////////////
 /// \brief Centrality/multiplicity percentile
 template <typename CollisionObject>
-  requires(o2::aod::HasRun2Centrality<CollisionObject>)
-float getCentMultPercentile(CollisionObject collision)
+requires(o2::aod::HasRun2Centrality<CollisionObject>) float getCentMultPercentile(CollisionObject collision)
 {
   switch (fCentMultEstimator) {
     case kV0M:
@@ -533,8 +532,7 @@ float getCentMultPercentile(CollisionObject collision)
 }
 
 template <typename CollisionObject>
-  requires(o2::aod::HasCentrality<CollisionObject>)
-float getCentMultPercentile(CollisionObject collision)
+requires(o2::aod::HasCentrality<CollisionObject>) float getCentMultPercentile(CollisionObject collision)
 {
   switch (fCentMultEstimator) {
     case kFV0A:
