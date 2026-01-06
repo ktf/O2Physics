@@ -24,19 +24,22 @@
 #include "TList.h"
 
 // O2 includes
-#include "CCDB/BasicCCDBManager.h"
-#include "ReconstructionDataFormats/Track.h"
-#include "CCDB/CcdbApi.h"
+#include "TableHelper.h"
+
 #include "PWGLF/DataModel/LFParticleIdentification.h"
+
 #include "Common/DataModel/TrackSelectionTables.h"
-#include "Framework/AnalysisTask.h"
+
+#include "CCDB/BasicCCDBManager.h"
+#include "CCDB/CcdbApi.h"
 #include "Framework/AnalysisDataModel.h"
-#include "Framework/runDataProcessing.h"
+#include "Framework/AnalysisTask.h"
 #include "Framework/HistogramRegistry.h"
 #include "Framework/RunningWorkflowInfo.h"
 #include "Framework/StaticFor.h"
+#include "Framework/runDataProcessing.h"
 #include "MathUtils/BetheBlochAleph.h"
-#include "TableHelper.h"
+#include "ReconstructionDataFormats/Track.h"
 
 using namespace o2;
 using namespace o2::framework;
