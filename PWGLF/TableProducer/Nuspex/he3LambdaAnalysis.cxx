@@ -23,7 +23,6 @@
 #include <DCAFitter/DCAFitterN.h>
 #include <DataFormatsParameters/GRPMagField.h>
 #include <DataFormatsParameters/GRPObject.h>
-#include <MathUtils/BetheBlochAleph.h>
 #include <DetectorsBase/GeometryManager.h>
 #include <DetectorsBase/Propagator.h>
 #include <Framework/ASoAHelpers.h>
@@ -31,6 +30,7 @@
 #include <Framework/AnalysisTask.h>
 #include <Framework/HistogramRegistry.h>
 #include <Framework/runDataProcessing.h>
+#include <MathUtils/BetheBlochAleph.h>
 #include <ReconstructionDataFormats/Track.h>
 
 #include <Math/Vector4D.h>

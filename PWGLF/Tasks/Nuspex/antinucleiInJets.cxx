@@ -34,7 +34,6 @@
 
 #include "CCDB/BasicCCDBManager.h"
 #include "CCDB/CcdbApi.h"
-#include "MathUtils/BetheBlochAleph.h"
 #include "Framework/ASoA.h"
 #include "Framework/ASoAHelpers.h"
 #include "Framework/AnalysisDataModel.h"
@@ -44,6 +43,7 @@
 #include "Framework/Logger.h"
 #include "Framework/RunningWorkflowInfo.h"
 #include "Framework/runDataProcessing.h"
+#include "MathUtils/BetheBlochAleph.h"
 #include "ReconstructionDataFormats/DCA.h"
 #include "ReconstructionDataFormats/PID.h"
 #include "ReconstructionDataFormats/Track.h"

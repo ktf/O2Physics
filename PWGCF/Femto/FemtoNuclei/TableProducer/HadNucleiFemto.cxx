@@ -40,7 +40,6 @@
 #include "CCDB/BasicCCDBManager.h"
 #include "DataFormatsParameters/GRPMagField.h"
 #include "DataFormatsParameters/GRPObject.h"
-#include "MathUtils/BetheBlochAleph.h"
 #include "DetectorsBase/GeometryManager.h"
 #include "DetectorsBase/Propagator.h"
 #include "Framework/ASoAHelpers.h"
@@ -49,6 +48,7 @@
 #include "Framework/HistogramRegistry.h"
 #include "Framework/StepTHn.h"
 #include "Framework/runDataProcessing.h"
+#include "MathUtils/BetheBlochAleph.h"
 #include "ReconstructionDataFormats/Track.h"
 
 #include "Math/Boost.h"
