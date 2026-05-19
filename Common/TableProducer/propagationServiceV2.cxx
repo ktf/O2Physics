@@ -72,9 +72,10 @@ struct propagationServiceV2 {
   o2::framework::Configurable<std::string> ccdburl{"ccdburl", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
   Service<o2::ccdb::BasicCCDBManager> ccdb;
 
-  // propagation stuff — ccdbLoader used only for lut + mMeanVtx (set from column) + runNumber
+  // propagation stuff — ccdbLoader used only for lut + mMeanVtx + runNumber
   o2::common::StandardCCDBLoaderConfigurables standardCCDBLoaderConfigurables;
   o2::common::StandardCCDBLoader ccdbLoader;
+  o2::dataformats::MeanVertexObject mMeanVtxValue; // owned copy; ccdbLoader.mMeanVtx points here
 
   // boilerplate: strangeness builder stuff
   o2::pwglf::strangenessbuilder::products products;
@@ -109,25 +110,24 @@ struct propagationServiceV2 {
     strangenessBuilderModule.init(baseOpts, v0BuilderOpts, cascadeBuilderOpts, preSelectOpts, histos, initContext);
   }
 
-  // Load MatLUT once (needs rectifyPtrFromFile, kept manual), set B-field per run from
-  // GRPMagField CCDB column, and refresh mMeanVtx pointer every call (pointer into current
-  // BC table, valid only for the duration of this process() invocation).
+  // Load MatLUT once (needs rectifyPtrFromFile, kept manual), set B-field and mean vertex
+  // once per run from GRPMagField/MeanVertex CCDB columns.
   template <typename TBC>
   void initCCDB(TBC const& bc0)
   {
+    if (ccdbLoader.runNumber != bc0.runNumber()) {
+      const auto& grpmag = bc0.grpMagField();
+      LOG(info) << "Setting B-field to current " << grpmag.getL3Current() << " A for run " << bc0.runNumber() << " from GRPMagField CCDB column";
+      o2::base::Propagator::initFieldFromGRP(&grpmag);
+      mMeanVtxValue = bc0.meanVertex(); // copy by value — message lifetime does not matter
+      ccdbLoader.mMeanVtx = &mMeanVtxValue;
+      ccdbLoader.runNumber = bc0.runNumber();
+    }
     if (!ccdbLoader.lut) {
       LOG(info) << "Loading material look-up table for run: " << bc0.runNumber();
       ccdbLoader.lut = o2::base::MatLayerCylSet::rectifyPtrFromFile(
         ccdb->template getForRun<o2::base::MatLayerCylSet>(standardCCDBLoaderConfigurables.lutPath.value, bc0.runNumber()));
       o2::base::Propagator::Instance()->setMatLUT(ccdbLoader.lut);
-    }
-    // Always refresh: pointer into current BC table, invalidated after process() returns
-    ccdbLoader.mMeanVtx = &bc0.meanVertex();
-    if (ccdbLoader.runNumber != bc0.runNumber()) {
-      const auto& grpmag = bc0.grpMagField(); // from declarative CCDB column
-      LOG(info) << "Setting B-field to current " << grpmag.getL3Current() << " A for run " << bc0.runNumber() << " from GRPMagField CCDB column";
-      o2::base::Propagator::initFieldFromGRP(&grpmag);
-      ccdbLoader.runNumber = bc0.runNumber();
     }
   }
 
