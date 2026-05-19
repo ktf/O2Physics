@@ -115,12 +115,6 @@ struct propagationServiceV2 {
   template <typename TBC>
   void initCCDB(TBC const& bc0)
   {
-    if (!ccdbLoader.lut) {
-      LOG(info) << "Loading material look-up table for run: " << bc0.runNumber();
-      ccdbLoader.lut = o2::base::MatLayerCylSet::rectifyPtrFromFile(
-        ccdb->template getForRun<o2::base::MatLayerCylSet>(standardCCDBLoaderConfigurables.lutPath.value, bc0.runNumber()));
-      o2::base::Propagator::Instance()->setMatLUT(ccdbLoader.lut);
-    }
     // Always refresh: pointer into current BC table, invalidated after process() returns
     ccdbLoader.mMeanVtx = &bc0.meanVertex();
     if (ccdbLoader.runNumber != bc0.runNumber()) {
@@ -128,6 +122,12 @@ struct propagationServiceV2 {
       LOG(info) << "Setting B-field to current " << grpmag.getL3Current() << " A for run " << bc0.runNumber() << " from GRPMagField CCDB column";
       o2::base::Propagator::initFieldFromGRP(&grpmag);
       ccdbLoader.runNumber = bc0.runNumber();
+    }
+    if (!ccdbLoader.lut) {
+      LOG(info) << "Loading material look-up table for run: " << bc0.runNumber();
+      ccdbLoader.lut = o2::base::MatLayerCylSet::rectifyPtrFromFile(
+        ccdb->template getForRun<o2::base::MatLayerCylSet>(standardCCDBLoaderConfigurables.lutPath.value, bc0.runNumber()));
+      o2::base::Propagator::Instance()->setMatLUT(ccdbLoader.lut);
     }
   }
 
