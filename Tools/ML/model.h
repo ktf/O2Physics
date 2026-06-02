@@ -138,13 +138,13 @@ class OnnxModel
 
   // Declaration of a raw graph input fed directly from an Arrow buffer.
   struct PreprocInput {
-    enum class Type { TrackFloat,    // per-track float column           [N]
-                      TrackInt32,    // per-track int32 column           [N]
-                      TrackUint8,    // per-track uint8 column           [N]
-                      TrackInt8,     // per-track int8 column            [N]
-                      TrackBool,     // per-track bool mask              [N]
-                      CollisionFloat,// per-collision float array        [C]
-                      ScalarFloat }; // single scalar (e.g. mass)        [1]
+    enum class Type { TrackFloat,     // per-track float column           [N]
+                      TrackInt32,     // per-track int32 column           [N]
+                      TrackUint8,     // per-track uint8 column           [N]
+                      TrackInt8,      // per-track int8 column            [N]
+                      TrackBool,      // per-track bool mask              [N]
+                      CollisionFloat, // per-collision float array        [C]
+                      ScalarFloat };  // single scalar (e.g. mass)        [1]
     std::string name;
     Type type;
   };
@@ -318,13 +318,30 @@ class OnnxModel
       std::vector<int64_t> dims = {-1};
       std::vector<std::string> sym = {"N"};
       switch (pin.type) {
-        case PreprocInput::Type::TrackFloat: et = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT; break;
-        case PreprocInput::Type::TrackInt32: et = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32; break;
-        case PreprocInput::Type::TrackUint8: et = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8; break;
-        case PreprocInput::Type::TrackInt8: et = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8; break;
-        case PreprocInput::Type::TrackBool: et = ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL; break;
-        case PreprocInput::Type::CollisionFloat: et = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT; sym = {"C"}; break;
-        case PreprocInput::Type::ScalarFloat: et = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT; dims = {1}; sym = {""}; break;
+        case PreprocInput::Type::TrackFloat:
+          et = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+          break;
+        case PreprocInput::Type::TrackInt32:
+          et = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
+          break;
+        case PreprocInput::Type::TrackUint8:
+          et = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
+          break;
+        case PreprocInput::Type::TrackInt8:
+          et = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;
+          break;
+        case PreprocInput::Type::TrackBool:
+          et = ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL;
+          break;
+        case PreprocInput::Type::CollisionFloat:
+          et = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+          sym = {"C"};
+          break;
+        case PreprocInput::Type::ScalarFloat:
+          et = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+          dims = {1};
+          sym = {""};
+          break;
       }
       Ort::TensorTypeAndShapeInfo tInfo(et, dims, &sym);
       auto typeInfo = Ort::TypeInfo::CreateTensorInfo(tInfo.GetConst());
