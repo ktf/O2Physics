@@ -414,6 +414,7 @@ class pidTPCModule
             network.initModel(pidTPCopts.networkPathLocally.value, pidTPCopts.enableNetworkOptimizations.value, pidTPCopts.networkSetNumThreads.value, strtoul(headers["Valid-From"].c_str(), NULL, 0), strtoul(headers["Valid-Until"].c_str(), NULL, 0));
             std::vector<float> dummyInput(network.getNumInputNodes(), 1.);
             network.evalModel(dummyInput); /// Init the model evaluations
+            setupColumnInputNetwork();
             LOGP(info, "Retrieved NN corrections for production tag {}, pass number {}, and NN-Version {}", headers["LPMProductionTag"], headers["RecoPassName"], headers["NN-Version"]);
           } else {
             LOG(fatal) << "No valid NN object found matching retrieved Bethe-Bloch parametrisation for pass " << metadata["RecoPassName"] << ". Please ensure that the requested pass has dedicated NN corrections available";
@@ -427,6 +428,7 @@ class pidTPCModule
           network.initModel(pidTPCopts.networkPathLocally.value, pidTPCopts.enableNetworkOptimizations.value, pidTPCopts.networkSetNumThreads.value);
           std::vector<float> dummyInput(network.getNumInputNodes(), 1.);
           network.evalModel(dummyInput); // This is an initialisation and might reduce the overhead of the model
+          setupColumnInputNetwork();
         }
       } else {
         return;
@@ -437,6 +439,22 @@ class pidTPCModule
       LOGF(fatal, "Using corrected dE/dx with a network version other than 5 will not work. Crashing now.");
     }
   } // end init
+
+  //__________________________________________________
+  void setupColumnInputNetwork()
+  {
+    int nInputs = network.getNumInputNodes();
+    std::vector<std::string> colNames;
+    colNames.reserve(nInputs);
+    // Column names must match the order used in createNetworkPrediction
+    const char* baseNames[] = {"tpcInnerParam", "tgl", "signed1Pt", "mass",
+                               "multNorm", "nclsNorm", "occupancyNorm",
+                               "hadronicRateNorm", "phiMod"};
+    for (int i = 0; i < nInputs; i++) {
+      colNames.emplace_back(baseNames[i]);
+    }
+    network.setupColumnInputs(colNames);
+  }
 
   //__________________________________________________
   template <typename TCCDB, typename M, typename T, typename B>
@@ -489,6 +507,7 @@ class pidTPCModule
           network.initModel(pidTPCopts.networkPathLocally.value, pidTPCopts.enableNetworkOptimizations.value, pidTPCopts.networkSetNumThreads.value, strtoul(headers["Valid-From"].c_str(), NULL, 0), strtoul(headers["Valid-Until"].c_str(), NULL, 0));
           std::vector<float> dummyInput(network.getNumInputNodes(), 1.);
           network.evalModel(dummyInput);
+          setupColumnInputNetwork();
           LOGP(info, "Retrieved NN corrections for production tag {}, pass number {}, NN-Version number {}", headers["LPMProductionTag"], headers["RecoPassName"], headers["NN-Version"]);
         } else {
           LOG(fatal) << "No valid NN object found matching retrieved Bethe-Bloch parametrisation for pass " << metadata["RecoPassName"] << ". Please ensure that the requested pass has dedicated NN corrections available";
@@ -497,18 +516,13 @@ class pidTPCModule
     }
 
     // Defining some network parameters
-    int input_dimensions = network.getNumInputNodes();
+    int input_dimensions = network.getNumColumns();
     int output_dimensions = network.getNumOutputNodes();
-    const uint64_t track_prop_size = input_dimensions * size;
     const uint64_t prediction_size = output_dimensions * size;
 
     network_prediction = std::vector<float>(prediction_size * 9); // For each mass hypotheses
     const float nNclNormalization = response->GetNClNormalization();
     float duration_network = 0;
-
-    std::vector<float> track_properties(track_prop_size);
-    uint64_t counter_track_props = 0;
-    int loop_counter = 0;
 
     // To load the Hadronic rate once for each collision
     float hadronicRateBegin = 0.;
@@ -530,88 +544,98 @@ class pidTPCModule
       hadronicRateBegin = 0.0f;
     }
 
-    // Filling a std::vector<float> to be evaluated by the network
-    // Evaluation on single tracks brings huge overhead: Thus evaluation is done on one large vector
+    // Extract per-column data in a single pass over tracks (instead of 9x)
     static constexpr int NParticleTypes = 9;
     constexpr int ExpectedInputDimensionsNNV2 = 7;
     constexpr int ExpectedInputDimensionsNNV3 = 8;
     constexpr int ExpectedInputDimensionsNNV4 = 9;
-    constexpr auto NetworkVersionV2 = "2";
-    constexpr auto NetworkVersionV3 = "3";
-    constexpr auto NetworkVersionV4 = "4";
-    for (int j = 0; j < NParticleTypes; j++) { // Loop over particle number for which network correction is used
-      for (auto const& trk : tracks) {
-        if (!trk.hasTPC()) {
+
+    const float hadronicRateDivisor = (collsys == CollisionSystemType::kCollSyspp) ? 1500.f : 50.f;
+
+    std::vector<float> colTpcInnerParam, colTgl, colSigned1Pt, colMass;
+    std::vector<float> colMultNorm, colNclsNorm;
+    std::vector<float> colOccupancyNorm, colHadronicRateNorm, colPhiMod;
+    colTpcInnerParam.reserve(size);
+    colTgl.reserve(size);
+    colSigned1Pt.reserve(size);
+    colMultNorm.reserve(size);
+    colNclsNorm.reserve(size);
+    if (input_dimensions >= ExpectedInputDimensionsNNV2) {
+      colOccupancyNorm.reserve(size);
+    }
+    if (input_dimensions >= ExpectedInputDimensionsNNV3) {
+      colHadronicRateNorm.reserve(size);
+    }
+    if (input_dimensions >= ExpectedInputDimensionsNNV4) {
+      colPhiMod.reserve(size);
+    }
+
+    for (auto const& trk : tracks) {
+      if (!trk.hasTPC()) {
+        continue;
+      }
+      if (pidTPCopts.skipTPCOnly) {
+        if (!trk.hasITS() && !trk.hasTRD() && !trk.hasTOF()) {
           continue;
         }
-        if (pidTPCopts.skipTPCOnly) {
-          if (!trk.hasITS() && !trk.hasTRD() && !trk.hasTOF()) {
-            continue;
-          }
+      }
+      colTpcInnerParam.push_back(trk.tpcInnerParam());
+      colTgl.push_back(trk.tgl());
+      colSigned1Pt.push_back(trk.signed1Pt());
+      colMultNorm.push_back(trk.has_collision() ? mults[trk.collisionId()] / 11000.f : 1.f);
+      colNclsNorm.push_back(std::sqrt(nNclNormalization / trk.tpcNClsFound()));
+      if (input_dimensions >= ExpectedInputDimensionsNNV2) {
+        colOccupancyNorm.push_back(trk.has_collision() ? collisions.iteratorAt(trk.collisionId()).ft0cOccupancyInTimeRange() / 60000.f : 1.f);
+      }
+      if (input_dimensions >= ExpectedInputDimensionsNNV3) {
+        if (trk.has_collision()) {
+          colHadronicRateNorm.push_back(hadronicRateForCollision[trk.collisionId()] / hadronicRateDivisor);
+        } else {
+          colHadronicRateNorm.push_back(hadronicRateBegin / hadronicRateDivisor);
         }
-        track_properties[counter_track_props] = trk.tpcInnerParam();
-        track_properties[counter_track_props + 1] = trk.tgl();
-        track_properties[counter_track_props + 2] = trk.signed1Pt();
-        track_properties[counter_track_props + 3] = o2::track::pid_constants::sMasses[j];
-        track_properties[counter_track_props + 4] = trk.has_collision() ? mults[trk.collisionId()] / 11000. : 1.;
-        track_properties[counter_track_props + 5] = std::sqrt(nNclNormalization / trk.tpcNClsFound());
-        if (input_dimensions == ExpectedInputDimensionsNNV2 && networkVersion == NetworkVersionV2) {
-          track_properties[counter_track_props + 6] = trk.has_collision() ? collisions.iteratorAt(trk.collisionId()).ft0cOccupancyInTimeRange() / 60000. : 1.;
-        }
-        if (input_dimensions == ExpectedInputDimensionsNNV3 && networkVersion == NetworkVersionV3) {
-          track_properties[counter_track_props + 6] = trk.has_collision() ? collisions.iteratorAt(trk.collisionId()).ft0cOccupancyInTimeRange() / 60000. : 1.;
-          if (trk.has_collision()) {
-            if (collsys == CollisionSystemType::kCollSyspp) {
-              track_properties[counter_track_props + 7] = hadronicRateForCollision[trk.collisionId()] / 1500.;
-            } else {
-              track_properties[counter_track_props + 7] = hadronicRateForCollision[trk.collisionId()] / 50.;
-            }
-          } else {
-            // asign Hadronic Rate at beginning of run  if track does not belong to a collision
-            if (collsys == CollisionSystemType::kCollSyspp) {
-              track_properties[counter_track_props + 7] = hadronicRateBegin / 1500.;
-            } else {
-              track_properties[counter_track_props + 7] = hadronicRateBegin / 50.;
-            }
-          }
-        }
+      }
+      if (input_dimensions >= ExpectedInputDimensionsNNV4) {
+        colPhiMod.push_back(std::fmod(std::fmod(trk.phi(), 2.f * static_cast<float>(M_PI)) + 2.f * static_cast<float>(M_PI), static_cast<float>(M_PI) / 9.0f));
+      }
+    }
 
-        if (input_dimensions == ExpectedInputDimensionsNNV4 && networkVersion == NetworkVersionV4) {
-          track_properties[counter_track_props + 6] = trk.has_collision() ? collisions.iteratorAt(trk.collisionId()).ft0cOccupancyInTimeRange() / 60000. : 1.;
-          if (trk.has_collision()) {
-            if (collsys == CollisionSystemType::kCollSyspp) {
-              track_properties[counter_track_props + 7] = hadronicRateForCollision[trk.collisionId()] / 1500.;
-            } else {
-              track_properties[counter_track_props + 7] = hadronicRateForCollision[trk.collisionId()] / 50.;
-            }
-          } else {
-            // asign Hadronic Rate at beginning of run  if track does not belong to a collision
-            if (collsys == CollisionSystemType::kCollSyspp) {
-              track_properties[counter_track_props + 7] = hadronicRateBegin / 1500.;
-            } else {
-              track_properties[counter_track_props + 7] = hadronicRateBegin / 50.;
-            }
-          }
-          track_properties[counter_track_props + 8] = std::fmod(std::fmod(trk.phi(), 2 * M_PI) + 2 * M_PI, M_PI / 9.0);
-        }
-        counter_track_props += input_dimensions;
+    const int64_t nValidTracks = static_cast<int64_t>(colTpcInnerParam.size());
+    colMass.resize(nValidTracks);
+    auto memInfo = Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+
+    // Evaluate network once per hypothesis, passing columns as separate tensors
+    for (int j = 0; j < NParticleTypes; j++) {
+      std::fill(colMass.begin(), colMass.end(), o2::track::pid_constants::sMasses[j]);
+
+      // Build column tensors (zero-copy wrapping existing vectors)
+      std::vector<Ort::Value> inputTensors;
+      inputTensors.reserve(input_dimensions);
+      inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colTpcInnerParam.data(), nValidTracks, &nValidTracks, 1));
+      inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colTgl.data(), nValidTracks, &nValidTracks, 1));
+      inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colSigned1Pt.data(), nValidTracks, &nValidTracks, 1));
+      inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colMass.data(), nValidTracks, &nValidTracks, 1));
+      inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colMultNorm.data(), nValidTracks, &nValidTracks, 1));
+      inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colNclsNorm.data(), nValidTracks, &nValidTracks, 1));
+      if (input_dimensions >= ExpectedInputDimensionsNNV2) {
+        inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colOccupancyNorm.data(), nValidTracks, &nValidTracks, 1));
+      }
+      if (input_dimensions >= ExpectedInputDimensionsNNV3) {
+        inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colHadronicRateNorm.data(), nValidTracks, &nValidTracks, 1));
+      }
+      if (input_dimensions >= ExpectedInputDimensionsNNV4) {
+        inputTensors.emplace_back(Ort::Value::CreateTensor<float>(memInfo, colPhiMod.data(), nValidTracks, &nValidTracks, 1));
       }
 
       auto start_network_eval = std::chrono::high_resolution_clock::now();
-      float* output_network = network.evalModel(track_properties);
+      float* output_network = network.evalModel<float>(inputTensors);
       auto stop_network_eval = std::chrono::high_resolution_clock::now();
       duration_network += std::chrono::duration<float, std::ratio<1, 1000000000>>(stop_network_eval - start_network_eval).count();
       for (uint64_t k = 0; k < prediction_size; k += output_dimensions) {
         for (int l = 0; l < output_dimensions; l++) {
-          network_prediction[k + l + prediction_size * loop_counter] = output_network[k + l];
+          network_prediction[k + l + prediction_size * j] = output_network[k + l];
         }
       }
-
-      counter_track_props = 0;
-      loop_counter += 1;
     }
-    track_properties.clear();
-
     auto stop_network_total = std::chrono::high_resolution_clock::now();
     LOG(debug) << "Neural Network for the TPC PID response correction: Time per track (eval ONNX): " << duration_network / (size * 9) << "ns ; Total time (eval ONNX): " << duration_network / 1000000000 << " s";
     LOG(debug) << "Neural Network for the TPC PID response correction: Time per track (eval + overhead): " << std::chrono::duration<float, std::ratio<1, 1000000000>>(stop_network_total - start_network_total).count() / (size * 9) << "ns ; Total time (eval + overhead): " << std::chrono::duration<float, std::ratio<1, 1000000000>>(stop_network_total - start_network_total).count() / 1000000000 << " s";
