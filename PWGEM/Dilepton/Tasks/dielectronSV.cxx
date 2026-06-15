@@ -14,7 +14,7 @@
 // This code is for dielectron analyses.
 //    Please write to: daiki.sekihata@cern.ch
 
-#include "PWGEM/Dilepton/Core/Dilepton.h"
+#include "PWGEM/Dilepton/Core/DileptonSV.h"
 #include "PWGEM/Dilepton/Utils/PairUtilities.h"
 
 #include <Framework/AnalysisTask.h>
@@ -25,5 +25,5 @@ using namespace o2::framework;
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
   return WorkflowSpec{
-    adaptAnalysisTask<Dilepton<o2::aod::pwgem::dilepton::utils::pairutil::DileptonPairType::kDielectron, MyEMH_electron, FilteredMyElectrons>>(cfgc, TaskName{"dielectron"})};
+    adaptAnalysisTask<DileptonSV<o2::aod::pwgem::dilepton::utils::pairutil::DileptonPairType::kDielectron, false, MyEMH_electron, FilteredMyElectrons>>(cfgc, TaskName{"dielectron-sv"})};
 }
