@@ -74,6 +74,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -95,6 +96,8 @@ DECLARE_SOA_COLUMN(P, p, float);
 DECLARE_SOA_COLUMN(Pt, pt, float);
 DECLARE_SOA_COLUMN(Eta, eta, float);
 DECLARE_SOA_COLUMN(Phi, phi, float);
+DECLARE_SOA_COLUMN(InvQPt, invQPt, float);
+DECLARE_SOA_COLUMN(Tanl, tanl, float);
 DECLARE_SOA_COLUMN(MatchLabel, matchLabel, int8_t);
 DECLARE_SOA_COLUMN(MatchType, matchType, int8_t);
 DECLARE_SOA_COLUMN(MatchChi2, matchChi2, float);
@@ -107,6 +110,9 @@ DECLARE_SOA_COLUMN(IsTagged, isTagged, bool);
 DECLARE_SOA_COLUMN(XAtVtx, xAtVtx, float);
 DECLARE_SOA_COLUMN(YAtVtx, yAtVtx, float);
 DECLARE_SOA_COLUMN(ZAtVtx, zAtVtx, float);
+DECLARE_SOA_COLUMN(FXAtPlaneZ2, fXAtPlaneZ2, float);
+DECLARE_SOA_COLUMN(FYAtPlaneZ2, fYAtPlaneZ2, float);
+DECLARE_SOA_COLUMN(FZAtPlaneZ2, fZAtPlaneZ2, float);
 DECLARE_SOA_COLUMN(PxAtVtx, pxAtVtx, float);
 DECLARE_SOA_COLUMN(PyAtVtx, pyAtVtx, float);
 DECLARE_SOA_COLUMN(PzAtVtx, pzAtVtx, float);
@@ -140,11 +146,16 @@ DECLARE_SOA_TABLE(QaMatchingMCHTrack, "AOD", "QAMCHTRK",
                   qamatching::Pt,
                   qamatching::Eta,
                   qamatching::Phi,
+                  qamatching::InvQPt,
+                  qamatching::Tanl,
                   qamatching::MftMatchAttempts,
                   qamatching::IsTagged,
                   qamatching::XAtVtx,
                   qamatching::YAtVtx,
                   qamatching::ZAtVtx,
+                  qamatching::FXAtPlaneZ2,
+                  qamatching::FYAtPlaneZ2,
+                  qamatching::FZAtPlaneZ2,
                   qamatching::PxAtVtx,
                   qamatching::PyAtVtx,
                   qamatching::PzAtVtx);
@@ -162,11 +173,22 @@ DECLARE_SOA_TABLE(QaMatchingCandidates, "AOD", "QAMCAND",
                   qamatching::ReducedEventId,
                   qamatching::ReducedTrackId,
                   qamatching::MatchLabel,
-                  qamatching::P, qamatching::Pt, qamatching::Eta, qamatching::Phi,
-                  qamatching::MatchType, qamatching::MatchChi2, qamatching::MatchScore, qamatching::MatchRanking,
+                  qamatching::P,
+                  qamatching::Pt,
+                  qamatching::Eta,
+                  qamatching::Phi,
+                  qamatching::InvQPt,
+                  qamatching::Tanl,
+                  qamatching::MatchType,
+                  qamatching::MatchChi2,
+                  qamatching::MatchScore,
+                  qamatching::MatchRanking,
                   qamatching::XAtVtx,
                   qamatching::YAtVtx,
                   qamatching::ZAtVtx,
+                  qamatching::FXAtPlaneZ2,
+                  qamatching::FYAtPlaneZ2,
+                  qamatching::FZAtPlaneZ2,
                   qamatching::PxAtVtx,
                   qamatching::PyAtVtx,
                   qamatching::PzAtVtx);
@@ -233,7 +255,6 @@ struct QaMatching {
 
   static constexpr int GlobalTrackTypeMax = 2;
   static constexpr int MchMidTrackType = 3;
-  static constexpr int FirstDecayMotherRank = 2;
   static constexpr int MftTrackTypeStandard = 0;
   static constexpr int MftTrackTypeCA = 1;
   static constexpr int ThetaAbsBoundaryDeg = 3;
@@ -263,11 +284,14 @@ struct QaMatching {
     double matchScoreProd{-1};
     double matchChi2Prod{-1};
     int matchRankingProd{-1};
-    int mftMchMatchAttempts{0};
     MuonMatchType matchType{kMatchTypeUndefined};
   };
 
   Configurable<bool> cfgIsMc{"cfgIsMc", true, "Wheter the processed data is from MC simulations"};
+
+  ////   Variables for selecting the collisions
+  Configurable<float> cfgVtxZLow{"cfgVtxZLow", -10.0f, "Lower limit for the vertex z position"};
+  Configurable<float> cfgVtxZUp{"cfgVtxZUp", 10.0f, "Upper limit for the vertex z position"};
 
   ////   Variables for selecting muon tracks
   Configurable<float> cfgPMchLow{"cfgPMchLow", 0.0f, ""};
@@ -442,7 +466,7 @@ struct QaMatching {
   } configMlOptions;
 
   std::vector<double> binsPtMl;
-  std::array<double, 1> cutValues;
+  std::array<double, 1> cutValues{};
   std::vector<int> cutDirMl;
   std::map<std::string, o2::analysis::MlResponseMFTMuonMatch<float>> matchingMlResponses;
   std::map<std::string, std::string> matchingChi2Functions;
@@ -462,6 +486,21 @@ struct QaMatching {
   // the map key is the MCH(-MID) track global index
   using MatchingCandidates = std::map<int64_t, std::vector<MatchingCandidate>>;
 
+  struct TrackTimeInfo {
+    // global BC number
+    int64_t bc{-1};
+    // track time relative to the global BC
+    double time{-1};
+    // time resolution
+    double timeRes{-1};
+  };
+
+  struct MchTrackInfo : public TrackTimeInfo {
+    int64_t index{-1};
+    // vector of MFT tracks that are time-compatible with this MCH track
+    std::vector<int64_t> compatMftTracks;
+  };
+
   struct CollisionInfo {
     int64_t index{0};
     // internal index of this collision in the derived table
@@ -473,8 +512,10 @@ struct QaMatching {
     int mftTracksMultiplicity{0};
     // vector of MFT track indexes
     std::vector<int64_t> mftTracks;
-    // vector of MCH(-MID) track indexes
-    std::vector<int64_t> mchTracks;
+    // time information for MFT tracks
+    std::unordered_map<int64_t, TrackTimeInfo> mftTimeInfos;
+    //  extra information for MCH(-MID) tracks
+    std::unordered_map<int64_t, MchTrackInfo> mchTracks;
     // mapping between original and reduced MCH track indexes
     std::map<int64_t, int64_t> reducedMchTrackIds;
     // matching candidates
@@ -486,13 +527,7 @@ struct QaMatching {
   };
 
   using CollisionInfos = std::map<int64_t, CollisionInfo>;
-
   std::unordered_map<int64_t, int32_t> mftTrackCovs;
-
-  std::vector<std::pair<int64_t, int64_t>> fMatchablePairs;
-  MatchingCandidates fMatchingCandidates;
-  std::vector<int64_t> fTaggedMuons;
-
   using MuonPair = std::pair<std::pair<int64_t, uint64_t>, std::pair<int64_t, uint64_t>>;
   using GlobalMuonPair = std::pair<std::pair<int64_t, std::vector<MatchingCandidate>>, std::pair<int64_t, std::vector<MatchingCandidate>>>;
 
@@ -520,9 +555,6 @@ struct QaMatching {
                                                        &registryMatching9}};
   HistogramRegistry registryDimuon{"registryDimuon", {}};
 
-  std::unordered_map<std::string, o2::framework::HistPtr> matchingHistos;
-  Matrix<o2::framework::HistPtr, 4, 4> dimuonHistos;
-
   Produces<o2::aod::QaMatchingEvents> qaMatchingEvents;
   Produces<o2::aod::QaMatchingMCHTrack> qaMatchingMCHTrack;
   Produces<o2::aod::QaMatchingCandidates> qaMatchingCandidates;
@@ -545,7 +577,7 @@ struct QaMatching {
     o2::framework::HistPtr etaPdgNum;
     o2::framework::HistPtr etaPdgDen;
 
-    EfficiencyPlotter(std::string path, std::string title,
+    EfficiencyPlotter(const std::string& path, const std::string& title,
                       HistogramRegistry& registry, bool createPdgMomHistograms)
     {
       AxisSpec pAxis = {100, 0, 100, "p (GeV/c)"};
@@ -803,7 +835,7 @@ struct QaMatching {
 
     HistogramRegistry* registry;
 
-    MatchingPlotter(std::string path,
+    MatchingPlotter(const std::string& path,
                     HistogramRegistry* reg,
                     bool createPdgMomHistograms,
                     int mftMultMax,
@@ -933,7 +965,6 @@ struct QaMatching {
     }
   };
   std::unique_ptr<MatchingPlotter> fChi2MatchingPlotter;
-  std::map<std::string, std::unique_ptr<HistogramRegistry>> fMatchingHistogramRegistries;
   std::map<std::string, std::unique_ptr<MatchingPlotter>> fMatchingPlotters;
   std::unique_ptr<MatchingPlotter> fTaggedMuonsMatchingPlotter;
 
@@ -969,19 +1000,38 @@ struct QaMatching {
   {
     AxisSpec chi2Axis = {1000, 0, 1000, "chi^{2}"};
     AxisSpec chi2AxisSmall = {200, 0, 100, "chi^{2}"};
-    AxisSpec pAxis = {1000, 0, 100, "p (GeV/c)"};
-    AxisSpec pTAxis = {100, 0, 10, "p_{T} (GeV/c)"};
+    AxisSpec pAxis = {50, 0, 100, "p (GeV/c)"};
+    AxisSpec pTAxis = {50, 0, 10, "p_{T} (GeV/c)"};
     AxisSpec etaAxis = {100, -4, -2, "#eta"};
-    AxisSpec phiAxis = {90, -180, 180, "#phi (degrees)"};
+    AxisSpec vzAxis = {20, -10, 10, "vertex_{z} (cm)"};
+    AxisSpec rAxis = {60, 0, 15, "R_{track} (cm)"};
+    AxisSpec mftNClusAxis = {6, 5, 11, "# of MFT clusters"};
+
     std::string histPath = cfgIsMc.value ? "matching/MC/" : "matching/";
 
     AxisSpec trackPositionXAtMftAxis = {100, -15, 15, "MFT x (cm)"};
     AxisSpec trackPositionYAtMftAxis = {100, -15, 15, "MFT y (cm)"};
-    registry.add((histPath + "pairedMCHTracksAtMFT").c_str(), "Paired MCH tracks position at MFT end", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
-    registry.add((histPath + "pairedMFTTracksAtMFT").c_str(), "Paired MFT tracks position at MFT end", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
-    registry.add((histPath + "selectedMCHTracksAtMFT").c_str(), "Selected MCH tracks position at MFT end", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
-    registry.add((histPath + "selectedMCHTracksAtMFTTrue").c_str(), "Selected MCH tracks position at MFT end - true", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
-    registry.add((histPath + "selectedMCHTracksAtMFTFake").c_str(), "Selected MCH tracks position at MFT end - fake", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
+    registry.add((histPath + "taggedMCHTracksAtMFT").c_str(), "Tagged MCH tracks position at MFT end", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
+    if (cfgIsMc.value) {
+      registry.add((histPath + "pairedMCHTracksAtMFT").c_str(), "Paired MCH tracks position at MFT end", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
+      registry.add((histPath + "pairedMFTTracksAtMFT").c_str(), "Paired MFT tracks position at MFT end", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
+      registry.add((histPath + "taggedMCHTracksAtMFTTrue").c_str(), "Tagged MCH tracks position at MFT end - true", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
+      registry.add((histPath + "taggedMCHTracksAtMFTFake").c_str(), "Tagged MCH tracks position at MFT end - fake", {HistType::kTH2F, {trackPositionXAtMftAxis, trackPositionYAtMftAxis}});
+    }
+
+    registry.add((histPath + "muonTracksVsMchKine").c_str(), "Muon tracks vs. MCH kine", {HistType::kTHnSparseF, {etaAxis, pTAxis, vzAxis}});
+    registry.add((histPath + "muonTracksVsMchKineAtVertex").c_str(), "Muon tracks vs. MCH kine at vertex", {HistType::kTHnSparseF, {etaAxis, pTAxis, vzAxis}});
+
+    registry.add((histPath + "muonTracksRadiusAtMftFront").c_str(), "Muon tracks radius at MFT front", {HistType::kTHnSparseF, {rAxis, vzAxis, pAxis}});
+    registry.add((histPath + "muonTracksRadiusAtMftBack").c_str(), "Muon tracks radius at MFT back", {HistType::kTHnSparseF, {rAxis, vzAxis, pAxis}});
+
+    if (cfgIsMc.value) {
+      registry.add((histPath + "muonTracksPairedVsMchKine").c_str(), "Paired muon tracks vs. MCH kine", {HistType::kTHnSparseF, {etaAxis, pTAxis, vzAxis, mftNClusAxis}});
+      registry.add((histPath + "muonTracksPairedVsMchKineAtVertex").c_str(), "Paired muon tracks vs. MCH kine at vertex", {HistType::kTHnSparseF, {etaAxis, pTAxis, vzAxis, mftNClusAxis}});
+
+      registry.add((histPath + "muonTracksRadiusPairedAtMftFront").c_str(), "Paired muon tracks radius at MFT front", {HistType::kTHnSparseF, {rAxis, vzAxis, pAxis}});
+      registry.add((histPath + "muonTracksRadiusPairedAtMftBack").c_str(), "Paired muon tracks radius at MFT back", {HistType::kTHnSparseF, {rAxis, vzAxis, pAxis}});
+    }
 
     fChi2MatchingPlotter = std::make_unique<MatchingPlotter>(histPath + "Prod/", &registryMatching, configQas.cfgCreatePdgMomHistograms, cfgMftTrackMultiplicityMax, cfgNCandidatesMax, cfgIsMc.value);
     int registryIndex = 0;
@@ -1891,10 +1941,11 @@ struct QaMatching {
                     std::vector<GlobalMuonPair>& globalMuonPairs)
   {
     // outer loop over muon tracks
-    for (const auto& mchIndex1 : collisionInfo.mchTracks) {
-
+    for (const auto& mchTrack1 : collisionInfo.mchTracks) {
+      auto mchIndex1 = mchTrack1.first;
       // inner loop over muon tracks
-      for (const auto& mchIndex2 : collisionInfo.mchTracks) {
+      for (const auto& mchTrack2 : collisionInfo.mchTracks) {
+        auto mchIndex2 = mchTrack2.first;
         // avoid double-counting of muon pairs
         if (mchIndex2 <= mchIndex1)
           continue;
@@ -1957,36 +2008,24 @@ struct QaMatching {
     return dimuon.M();
   }
 
-  template <class EVT, class BC, class TMUON, class TMFTS>
-  int getMftMchMatchAttempts(EVT const& collisions,
-                             BC const& bcs,
-                             TMUON const& mchTrack,
-                             TMFTS const& mftTracks)
+  int getMftMchMatchAttempts(MchTrackInfo& mchTrackInfo,
+                             const std::unordered_map<int64_t, TrackTimeInfo>& mftTracksInfos)
   {
-    if (!mchTrack.has_collision()) {
-      return 0;
-    }
-    const auto& collMch = collisions.rawIteratorAt(mchTrack.collisionId());
-    const auto& bcMch = bcs.rawIteratorAt(collMch.bcId());
-
+    const auto& bcMch = mchTrackInfo.bc;
     int attempts{0};
-    for (const auto& mftTrack : mftTracks) {
-      if (!mftTrack.has_collision()) {
-        continue;
-      }
+    for (const auto& [mftTrackIndex, mftTrackInfo] : mftTracksInfos) {
+      const auto& bcMft = mftTrackInfo.bc;
 
-      const auto& collMft = collisions.rawIteratorAt(mftTrack.collisionId());
-      const auto& bcMft = bcs.rawIteratorAt(collMft.bcId());
-
-      int64_t deltaBc = static_cast<int64_t>(bcMft.globalBC()) - static_cast<int64_t>(bcMch.globalBC());
+      int64_t deltaBc = bcMft - bcMch;
       double deltaBcNS = o2::constants::lhc::LHCBunchSpacingNS * deltaBc;
-      double deltaTrackTime = mftTrack.trackTime() - mchTrack.trackTime() + deltaBcNS;
-      double trackTimeResTot = mftTrack.trackTimeRes() + mchTrack.trackTimeRes();
+      double deltaTrackTime = mftTrackInfo.time - mchTrackInfo.time + deltaBcNS;
+      double trackTimeResTot = mftTrackInfo.timeRes + mchTrackInfo.timeRes;
 
       if (std::fabs(deltaTrackTime) > trackTimeResTot) {
         continue;
       }
       attempts += 1;
+      mchTrackInfo.compatMftTracks.push_back(mftTrackIndex);
     }
 
     return attempts;
@@ -2031,6 +2070,35 @@ struct QaMatching {
       int64_t collisionIndex = collision.globalIndex();
       auto bc = bcs.rawIteratorAt(collision.bcId());
 
+      // remove vertices outside the allowed z range
+      if ((collision.posZ() < cfgVtxZLow.value) || (collision.posZ() > cfgVtxZUp.value)) {
+        continue;
+      }
+
+      // fill collision information for MFT standalone tracks
+      for (const auto& mftTrack : mftTracks) {
+        if (!mftTrack.has_collision())
+          continue;
+
+        if (collisionIndex != mftTrack.collisionId()) {
+          continue;
+        }
+
+        int64_t mftTrackIndex = mftTrack.globalIndex();
+
+        auto& collisionInfo = collisionInfos[collisionIndex];
+        collisionInfo.index = collisionIndex;
+        collisionInfo.bc = bc.globalBC();
+        collisionInfo.zVertex = collision.posZ();
+
+        collisionInfo.mftTracks.push_back(mftTrackIndex);
+
+        auto& timeInfo = collisionInfo.mftTimeInfos[mftTrackIndex];
+        timeInfo.bc = bc.globalBC();
+        timeInfo.time = mftTrack.trackTime();
+        timeInfo.timeRes = mftTrack.trackTimeRes();
+      }
+
       // fill collision information for global muon tracks (MFT-MCH-MID matches)
       for (const auto& muonTrack : muonTracks) {
         if (!muonTrack.has_collision())
@@ -2054,7 +2122,13 @@ struct QaMatching {
         if (static_cast<int>(muonTrack.trackType()) > GlobalTrackTypeMax) {
           // standalone MCH or MCH-MID tracks
           int64_t mchTrackIndex = muonTrack.globalIndex();
-          collisionInfo.mchTracks.push_back(mchTrackIndex);
+          auto& mchTrackInfo = collisionInfo.mchTracks[mchTrackIndex];
+          mchTrackInfo.index = mchTrackIndex;
+          mchTrackInfo.bc = bc.globalBC();
+          mchTrackInfo.time = muonTrack.trackTime();
+          mchTrackInfo.timeRes = muonTrack.trackTimeRes();
+          getMftMchMatchAttempts(mchTrackInfo, collisionInfo.mftTimeInfos);
+
           collisionInfo.reducedMchTrackIds[mchTrackIndex] = reducedMchTrackId;
           reducedMchTrackId += 1;
         } else {
@@ -2076,10 +2150,8 @@ struct QaMatching {
           auto const& mftTrackCov = mftCovs.rawIteratorAt(mftTrackCovs[mftTrack.globalIndex()]);
 
           // propagate MCH and MFT tracks to matching plane
-          auto mchTrackProp = fwdToTrackPar(mchTrack, mchTrack);
-          mchTrackProp = propagateToMatchingPlaneMch(mchTrack, mftTrack, mftTrackCov, collision, MatchingPlaneDefaultZ, 0);
-          auto mftTrackProp = fwdToTrackPar(mftTrack, mftTrackCov);
-          mftTrackProp = propagateToMatchingPlaneMft(mchTrack, mftTrack, mftTrackCov, collision, MatchingPlaneDefaultZ, 0);
+          auto mchTrackProp = propagateToMatchingPlaneMch(mchTrack, mftTrack, mftTrackCov, collision, MatchingPlaneDefaultZ, 0);
+          auto mftTrackProp = propagateToMatchingPlaneMft(mchTrack, mftTrack, mftTrackCov, collision, MatchingPlaneDefaultZ, 0);
 
           // check if a vector of global muon candidates is already available for the current MCH index
           // if not, initialize a new one and add the current global muon track
@@ -2100,7 +2172,6 @@ struct QaMatching {
               matchScore,
               matchChi2,
               -1,
-              0,
               kMatchTypeUndefined});
           } else {
             collisionInfo.matchingCandidates[mchTrackIndex].emplace_back(MatchingCandidate{
@@ -2117,29 +2188,9 @@ struct QaMatching {
               matchScore,
               matchChi2,
               -1,
-              0,
               kMatchTypeUndefined});
           }
         }
-      }
-
-      // fill collision information for MFT standalone tracks
-      for (const auto& mftTrack : mftTracks) {
-        if (!mftTrack.has_collision())
-          continue;
-
-        if (collisionIndex != mftTrack.collisionId()) {
-          continue;
-        }
-
-        int64_t mftTrackIndex = mftTrack.globalIndex();
-
-        auto& collisionInfo = collisionInfos[collisionIndex];
-        collisionInfo.index = collisionIndex;
-        collisionInfo.bc = bc.globalBC();
-        collisionInfo.zVertex = collision.posZ();
-
-        collisionInfo.mftTracks.push_back(mftTrackIndex);
       }
     }
 
@@ -2156,8 +2207,6 @@ struct QaMatching {
       for (auto& [mchIndex, globalTracksVector] : collisionInfo.matchingCandidates) { // o2-linter: disable=const-ref-in-for-loop (object is modified in loop)
         std::sort(globalTracksVector.begin(), globalTracksVector.end(), compareMatchingChi2);
 
-        const auto& mchTrack = muonTracks.rawIteratorAt(mchIndex);
-        auto mftMchMatchAttempts = getMftMchMatchAttempts(collisions, bcs, mchTrack, mftTracks);
         int ranking = 1;
         for (auto& candidate : globalTracksVector) { // o2-linter: disable=const-ref-in-for-loop (object is modified in loop)
           candidate.matchRanking = ranking;
@@ -2167,7 +2216,6 @@ struct QaMatching {
           } else {
             candidate.matchType = kMatchTypeUndefined;
           }
-          candidate.mftMchMatchAttempts = mftMchMatchAttempts;
           ranking += 1;
         }
       }
@@ -2305,7 +2353,10 @@ struct QaMatching {
         mcParticleDz = collision.posZ() - mchMcParticle.vz();
       }
 
-      int matchAttempts = globalTracksVector[0].mftMchMatchAttempts;
+      int matchAttempts = 0;
+      if (const auto& mchTrackInfoIt = collisionInfo.mchTracks.find(mchIndex); mchTrackInfoIt != collisionInfo.mchTracks.end()) {
+        matchAttempts = mchTrackInfoIt->second.compatMftTracks.size();
+      }
 
       std::get<std::shared_ptr<TH1>>(plotter->fMatchRanking->hist)->Fill(trueMatchIndex);
       std::get<std::shared_ptr<TH2>>(plotter->fMatchRanking->histVsP)->Fill(mchMom, trueMatchIndex);
@@ -2694,13 +2745,12 @@ struct QaMatching {
     }
   }
 
-  template <bool isMC, class C, class BC, class TMUON, class TMFT, class CMFT>
+  template <bool isMC, class C, class TMUON, class TMFT, class CMFT>
   void runChi2Matching(C const& collisions,
-                       BC const& bcs,
                        TMUON const& muonTracks,
                        TMFT const& mftTracks,
                        CMFT const& mftCovs,
-                       std::string funcName,
+                       const std::string& funcName,
                        float matchingPlaneZ,
                        int extrapMethod,
                        const std::vector<std::pair<int64_t, int64_t>>& matchablePairs,
@@ -2769,7 +2819,6 @@ struct QaMatching {
             -1,
             matchScoreProd,
             matchChi2Prod,
-            -1,
             kMatchTypeUndefined});
         } else {
           newMatchingCandidates[mchIndex].emplace_back(MatchingCandidate{
@@ -2785,7 +2834,6 @@ struct QaMatching {
             -1,
             matchScoreProd,
             matchChi2Prod,
-            -1,
             kMatchTypeUndefined});
         }
       }
@@ -2799,8 +2847,6 @@ struct QaMatching {
     for (auto& [mchIndex, globalTracksVector] : newMatchingCandidates) { // o2-linter: disable=const-ref-in-for-loop (object is modified in loop)
       std::sort(globalTracksVector.begin(), globalTracksVector.end(), compareMatchingChi2);
 
-      const auto& mchTrack = muonTracks.rawIteratorAt(mchIndex);
-      auto mftMchMatchAttempts = getMftMchMatchAttempts(collisions, bcs, mchTrack, mftTracks);
       int ranking = 1;
       for (auto& candidate : globalTracksVector) { // o2-linter: disable=const-ref-in-for-loop (object is modified in loop)
         candidate.matchRanking = ranking;
@@ -2809,15 +2855,13 @@ struct QaMatching {
         } else {
           candidate.matchType = kMatchTypeUndefined;
         }
-        candidate.mftMchMatchAttempts = mftMchMatchAttempts;
         ranking += 1;
       }
     }
   }
 
-  template <bool isMC, class C, class BC, class TMUON, class TMFT, class CMFT>
+  template <bool isMC, class C, class TMUON, class TMFT, class CMFT>
   void runChi2Matching(C const& collisions,
-                       BC const& bcs,
                        TMUON const& muonTracks,
                        TMFT const& mftTracks,
                        CMFT const& mftCovs,
@@ -2846,12 +2890,11 @@ struct QaMatching {
     auto matchingPlaneZ = matchingPlanesZ[label];
     auto extrapMethod = matchingExtrapMethod[label];
 
-    runChi2Matching<isMC>(collisions, bcs, muonTracks, mftTracks, mftCovs, funcName, matchingPlaneZ, extrapMethod, matchablePairs, matchingCandidates, newMatchingCandidates);
+    runChi2Matching<isMC>(collisions, muonTracks, mftTracks, mftCovs, funcName, matchingPlaneZ, extrapMethod, matchablePairs, matchingCandidates, newMatchingCandidates);
   }
 
-  template <bool isMC, class C, class BC, class TMUON, class TMFT, class CMFT>
+  template <bool isMC, class C, class TMUON, class TMFT, class CMFT>
   void runMlMatching(C const& collisions,
-                     BC const& bcs,
                      TMUON const& muonTracks,
                      TMFT const& mftTracks,
                      CMFT const& mftCovs,
@@ -2922,7 +2965,6 @@ struct QaMatching {
             -1,
             matchScoreProd,
             matchChi2Prod,
-            -1,
             kMatchTypeUndefined});
         } else {
           newMatchingCandidates[mchIndex].emplace_back(MatchingCandidate{
@@ -2938,7 +2980,6 @@ struct QaMatching {
             -1,
             matchScoreProd,
             matchChi2Prod,
-            -1,
             kMatchTypeUndefined});
         }
       }
@@ -2952,8 +2993,6 @@ struct QaMatching {
     for (auto& [mchIndex, globalTracksVector] : newMatchingCandidates) { // o2-linter: disable=const-ref-in-for-loop (object is modified in loop)
       std::sort(globalTracksVector.begin(), globalTracksVector.end(), compareMatchingScore);
 
-      const auto& mchTrack = muonTracks.rawIteratorAt(mchIndex);
-      auto mftMchMatchAttempts = getMftMchMatchAttempts(collisions, bcs, mchTrack, mftTracks);
       int ranking = 1;
       for (auto& candidate : globalTracksVector) { // o2-linter: disable=const-ref-in-for-loop (object is modified in loop)
         candidate.matchRanking = ranking;
@@ -2962,16 +3001,14 @@ struct QaMatching {
         } else {
           candidate.matchType = kMatchTypeUndefined;
         }
-        candidate.mftMchMatchAttempts = mftMchMatchAttempts;
         ranking += 1;
       }
     }
   }
 
-  template <bool isMC, class C, class BC, class TMUON, class TMFT, class CMFT>
+  template <bool isMC, class C, class TMUON, class TMFT, class CMFT>
   void processCollision(const CollisionInfo& collisionInfo,
                         C const& collisions,
-                        BC const& bcs,
                         TMUON const& muonTracks,
                         TMFT const& mftTracks,
                         CMFT const& mftCovs)
@@ -2983,16 +3020,72 @@ struct QaMatching {
 
     int debugCounter{0};
     fillQaMatchingAodEventForCollision(collisionInfo, collision, collisionInfo.reducedEventId, debugCounter);
-    fillQaMatchingMchTracksForCollision(collisionInfo, collisions, collision, muonTracks, mftTracks, bcs, taggedMuons, collisionInfo.reducedEventId);
+    fillQaMatchingMchTracksForCollision(collisionInfo, collision, muonTracks, taggedMuons, collisionInfo.reducedEventId, collisionInfo.reducedMchTrackIds);
 
     registry.get<TH1>(HIST("tracksMultiplicityMFT"))->Fill(collisionInfo.mftTracks.size());
     registry.get<TH1>(HIST("tracksMultiplicityMCH"))->Fill(collisionInfo.mchTracks.size());
+
+    for (const auto& element : collisionInfo.mchTracks) {
+      auto mchIndex = element.first;
+      auto const& mchTrack = muonTracks.rawIteratorAt(mchIndex);
+      auto mchTrackAtVertex = VarManager::PropagateMuon(mchTrack, collision, VarManager::kToVertex);
+
+      float mchEta = mchTrack.eta();
+      float mchPt = mchTrack.pt();
+      float mchP = mchTrack.p();
+      float mchEtaAtVertex = mchTrackAtVertex.getEta();
+      float mchPtAtVertex = mchTrackAtVertex.getPt();
+
+      float zMftFront = o2::mft::constants::mft::LayerZCoordinate()[0];
+      float zMftBack = o2::mft::constants::mft::LayerZCoordinate()[9];
+      auto mchTrackAtMftFront = propagateToZMch(mchTrackAtVertex, zMftFront);
+      auto mchTrackAtMftBack = propagateToZMch(mchTrackAtVertex, zMftBack);
+
+      float rAtMftFront = std::hypot(mchTrackAtMftFront.getX(), mchTrackAtMftFront.getY());
+      float rAtMftBack = std::hypot(mchTrackAtMftBack.getX(), mchTrackAtMftBack.getY());
+
+      if (isMC) {
+        registry.get<THnSparse>(HIST("matching/MC/muonTracksVsMchKine"))->Fill(mchEta, mchPt, collision.posZ());
+        registry.get<THnSparse>(HIST("matching/MC/muonTracksVsMchKineAtVertex"))->Fill(mchEtaAtVertex, mchPtAtVertex, collision.posZ());
+        registry.get<THnSparse>(HIST("matching/MC/muonTracksRadiusAtMftFront"))->Fill(rAtMftFront, collision.posZ(), mchP);
+        registry.get<THnSparse>(HIST("matching/MC/muonTracksRadiusAtMftBack"))->Fill(rAtMftBack, collision.posZ(), mchP);
+      } else {
+        registry.get<THnSparse>(HIST("matching/muonTracksVsMchKine"))->Fill(mchEta, mchPt, collision.posZ());
+        registry.get<THnSparse>(HIST("matching/muonTracksVsMchKineAtVertex"))->Fill(mchEtaAtVertex, mchPtAtVertex, collision.posZ());
+        registry.get<THnSparse>(HIST("matching/muonTracksRadiusAtMftFront"))->Fill(rAtMftFront, collision.posZ(), mchP);
+        registry.get<THnSparse>(HIST("matching/muonTracksRadiusAtMftBack"))->Fill(rAtMftBack, collision.posZ(), mchP);
+      }
+
+      if (isMC) {
+        auto matchablePair = getMatchablePairForMch(mchIndex, collisionInfo.matchablePairs);
+        if (!matchablePair) {
+          continue;
+        }
+        auto const& mftTrack = mftTracks.rawIteratorAt(matchablePair.value().second);
+        registry.get<THnSparse>(HIST("matching/MC/muonTracksPairedVsMchKine"))->Fill(mchEta, mchPt, collision.posZ(), mftTrack.nClusters());
+        registry.get<THnSparse>(HIST("matching/MC/muonTracksPairedVsMchKineAtVertex"))->Fill(mchEtaAtVertex, mchPtAtVertex, collision.posZ(), mftTrack.nClusters());
+
+        registry.get<THnSparse>(HIST("matching/MC/muonTracksRadiusPairedAtMftFront"))->Fill(rAtMftFront, collision.posZ(), mchP);
+        registry.get<THnSparse>(HIST("matching/MC/muonTracksRadiusPairedAtMftBack"))->Fill(rAtMftBack, collision.posZ(), mchP);
+
+        if (mftTrackCovs.count(mftTrack.globalIndex()) < 1) {
+          continue;
+        }
+        auto const& mftTrackCov = mftCovs.rawIteratorAt(mftTrackCovs[mftTrack.globalIndex()]);
+
+        // extrapolate the tracks to the matching plane
+        auto mftTrackAtMftBack = propagateToZMft(fwdToTrackPar(mftTrack, mftTrackCov), zMftBack);
+
+        registry.get<TH2>(HIST("matching/MC/pairedMCHTracksAtMFT"))->Fill(mchTrackAtMftBack.getX(), mchTrackAtMftBack.getY());
+        registry.get<TH2>(HIST("matching/MC/pairedMFTTracksAtMFT"))->Fill(mftTrackAtMftBack.getX(), mftTrackAtMftBack.getY());
+      }
+    }
 
     int matchingMethodCounter{0};
 
     //-------------------------------
     // Chi2-based matching from production
-    fillQaMatchingAodTablesForCollision(collision, muonTracks, mftTracks, collisionInfo.matchingCandidates, matchingMethodCounter, collisionInfo.reducedEventId, collisionInfo.reducedMchTrackIds);
+    fillQaMatchingAodTablesForCollision(collision, muonTracks, mftTracks, collisionInfo.matchingCandidates, matchingMethodCounter, collisionInfo.reducedEventId, collisionInfo.reducedMchTrackIds, mftCovs);
     if constexpr (isMC) {
       fillMatchingPlotsMc(collision, collisionInfo, muonTracks, mftTracks, taggedMuons, collisionInfo.matchingCandidates, collisionInfo.matchingCandidates, collisionInfo.matchablePairs, cfgMatchingChi2ScoreMftMchLow, fChi2MatchingPlotter.get(), false);
     } else {
@@ -3001,29 +3094,6 @@ struct QaMatching {
 
     //-------------------------------
     // Tagged muons
-    for (const auto& [mchIndex, mftIndex] : collisionInfo.matchablePairs) {
-      auto const& mchTrack = muonTracks.rawIteratorAt(mchIndex);
-      if (!mchTrack.has_collision())
-        continue;
-      auto collision = collisions.rawIteratorAt(mchTrack.collisionId());
-
-      auto const& mftTrack = mftTracks.rawIteratorAt(mftIndex);
-      if (mftTrackCovs.count(mftTrack.globalIndex()) < 1) {
-        continue;
-      }
-      auto const& mftTrackCov = mftCovs.rawIteratorAt(mftTrackCovs[mftTrack.globalIndex()]);
-
-      auto mchTrackAtVertex = VarManager::PropagateMuon(mchTrack, collision, VarManager::kToVertex);
-
-      // extrapolate to the matching plane
-      auto z = o2::mft::constants::mft::LayerZCoordinate()[9];
-      auto mchTrackProp = propagateToZMch(mchTrackAtVertex, z);
-      auto mftTrackProp = propagateToZMft(fwdToTrackPar(mftTrack, mftTrackCov), z);
-
-      registry.get<TH2>(HIST("matching/MC/pairedMCHTracksAtMFT"))->Fill(mchTrackProp.getX(), mchTrackProp.getY());
-      registry.get<TH2>(HIST("matching/MC/pairedMFTTracksAtMFT"))->Fill(mftTrackProp.getX(), mftTrackProp.getY());
-    }
-
     MatchingCandidates taggedMatchingCandidates;
     for (const auto& [mchIndex, globalTracksVector] : collisionInfo.matchingCandidates) {
       if (std::find(taggedMuons.begin(), taggedMuons.end(), mchIndex) != taggedMuons.end()) {
@@ -3040,13 +3110,13 @@ struct QaMatching {
     // Custom chi2-based matching methods
     for (const auto& [label, func] : matchingChi2Functions) {
       MatchingCandidates matchingCandidates;
-      runChi2Matching<isMC>(collisions, bcs, muonTracks, mftTracks, mftCovs, label, collisionInfo.matchablePairs, collisionInfo.matchingCandidates, matchingCandidates);
+      runChi2Matching<isMC>(collisions, muonTracks, mftTracks, mftCovs, label, collisionInfo.matchablePairs, collisionInfo.matchingCandidates, matchingCandidates);
 
       auto* plotter = fMatchingPlotters.at(label).get();
       double matchingScoreCut = matchingScoreCuts.at(label);
 
       matchingMethodCounter += 1;
-      fillQaMatchingAodTablesForCollision(collision, muonTracks, mftTracks, matchingCandidates, matchingMethodCounter, collisionInfo.reducedEventId, collisionInfo.reducedMchTrackIds);
+      fillQaMatchingAodTablesForCollision(collision, muonTracks, mftTracks, matchingCandidates, matchingMethodCounter, collisionInfo.reducedEventId, collisionInfo.reducedMchTrackIds, mftCovs);
       if constexpr (isMC) {
         fillMatchingPlotsMc(collision, collisionInfo, muonTracks, mftTracks, taggedMuons, matchingCandidates, collisionInfo.matchingCandidates, collisionInfo.matchablePairs, matchingScoreCut, plotter, false);
       } else {
@@ -3058,13 +3128,13 @@ struct QaMatching {
     // Custom ML-based matching methods
     for (const auto& [label, mlResponse] : matchingMlResponses) {
       MatchingCandidates matchingCandidates;
-      runMlMatching<isMC>(collisions, bcs, muonTracks, mftTracks, mftCovs, label, collisionInfo.matchablePairs, collisionInfo.matchingCandidates, matchingCandidates);
+      runMlMatching<isMC>(collisions, muonTracks, mftTracks, mftCovs, label, collisionInfo.matchablePairs, collisionInfo.matchingCandidates, matchingCandidates);
 
       auto* plotter = fMatchingPlotters.at(label).get();
       double matchingScoreCut = matchingScoreCuts.at(label);
 
       matchingMethodCounter += 1;
-      fillQaMatchingAodTablesForCollision(collision, muonTracks, mftTracks, matchingCandidates, matchingMethodCounter, collisionInfo.reducedEventId, collisionInfo.reducedMchTrackIds);
+      fillQaMatchingAodTablesForCollision(collision, muonTracks, mftTracks, matchingCandidates, matchingMethodCounter, collisionInfo.reducedEventId, collisionInfo.reducedMchTrackIds, mftCovs);
       if constexpr (isMC) {
         fillMatchingPlotsMc(collision, collisionInfo, muonTracks, mftTracks, taggedMuons, matchingCandidates, collisionInfo.matchingCandidates, collisionInfo.matchablePairs, matchingScoreCut, plotter);
       } else {
@@ -3077,14 +3147,15 @@ struct QaMatching {
     fillDimuonPlotsMc(collisionInfo, collisions, muonTracks, mftTracks);
   }
 
-  template <class TCOLLISION, class TMUON, class TMFT>
+  template <class TCOLLISION, class TMUON, class TMFT, class CMFT>
   void fillQaMatchingAodTablesForCollision(TCOLLISION const& collision,
                                            TMUON const& muonTracks,
                                            TMFT const& mftTracks,
                                            const MatchingCandidates& matchingCandidates,
                                            int8_t matchLabel,
                                            int32_t reducedEventId,
-                                           std::map<int64_t, int64_t> reducedMchTrackIds)
+                                           std::map<int64_t, int64_t> reducedMchTrackIds,
+                                           CMFT const& mftCovs)
   {
     for (const auto& [mchIndex, candidates] : matchingCandidates) {
       if (candidates.empty()) {
@@ -3105,8 +3176,13 @@ struct QaMatching {
       for (const auto& candidate : candidates) {
         const auto& candidateTrack = muonTracks.rawIteratorAt(candidate.globalTrackId);
         const auto& mftTrack = mftTracks.rawIteratorAt(candidate.mftTrackId);
+        if (mftTrackCovs.count(mftTrack.globalIndex()) < 1) {
+          continue;
+        }
+        auto const& mftTrackCov = mftCovs.rawIteratorAt(mftTrackCovs[mftTrack.globalIndex()]);
         // propagate global forward track to vertex using momentum rescaling method
         auto candidateTrackAtVertex = propagateToVertexMft(mftTrack, mchTrack, collision);
+        auto candidateTrackAtPlaneZ2 = propagateToZMft(mftTrack, mftTrackCov, o2::mft::constants::mft::LayerZCoordinate()[9]);
         qaMatchingCandidates(
           reducedEventId,
           reducedMchTrackId,
@@ -3115,6 +3191,8 @@ struct QaMatching {
           static_cast<float>(candidateTrack.pt()),
           static_cast<float>(candidateTrack.eta()),
           static_cast<float>(candidateTrack.phi()),
+          static_cast<float>(candidateTrack.signed1Pt()),
+          static_cast<float>(candidateTrack.tgl()),
           static_cast<int8_t>(candidate.matchType),
           static_cast<float>(candidate.matchChi2),
           static_cast<float>(candidate.matchScore),
@@ -3122,6 +3200,9 @@ struct QaMatching {
           static_cast<float>(candidateTrackAtVertex.getX()),
           static_cast<float>(candidateTrackAtVertex.getY()),
           static_cast<float>(candidateTrackAtVertex.getZ()),
+          static_cast<float>(candidateTrackAtPlaneZ2.getX()),
+          static_cast<float>(candidateTrackAtPlaneZ2.getY()),
+          static_cast<float>(candidateTrackAtPlaneZ2.getZ()),
           static_cast<float>(candidateTrackAtVertex.getPx()),
           static_cast<float>(candidateTrackAtVertex.getPy()),
           static_cast<float>(candidateTrackAtVertex.getPz()));
@@ -3148,33 +3229,30 @@ struct QaMatching {
     }
   }
 
-  template <class TCOLLISIONS, class TCOLLISION, class TMUON, class TMFT, class TBC>
+  template <class TCOLLISION, class TMUON>
   void fillQaMatchingMchTracksForCollision(const CollisionInfo& collisionInfo,
-                                           TCOLLISIONS const& collisions,
                                            TCOLLISION const& collision,
                                            TMUON const& muonTracks,
-                                           TMFT const& mftTracks,
-                                           TBC const& bcs,
                                            const std::vector<int64_t>& taggedMuons,
-                                           int32_t reducedEventId)
+                                           int32_t reducedEventId,
+                                           const std::map<int64_t, int64_t>& reducedMchTrackIds)
   {
-    std::vector<int64_t> mchIds;
-    for (const auto& mchIndex : collisionInfo.mchTracks) {
-      if (std::find(mchIds.begin(), mchIds.end(), mchIndex) == mchIds.end()) {
-        mchIds.emplace_back(mchIndex);
-      }
+    std::vector<std::pair<int64_t, int64_t>> orderedMchIds;
+    orderedMchIds.reserve(reducedMchTrackIds.size());
+    for (const auto& [mchIndex, reducedMchTrackId] : reducedMchTrackIds) {
+      orderedMchIds.emplace_back(reducedMchTrackId, mchIndex);
     }
-    for (const auto& [mchIndex, candidates] : collisionInfo.matchingCandidates) {
-      (void)candidates;
-      if (std::find(mchIds.begin(), mchIds.end(), mchIndex) == mchIds.end()) {
-        mchIds.emplace_back(mchIndex);
-      }
-    }
+    std::sort(orderedMchIds.begin(), orderedMchIds.end());
 
-    for (const auto& mchIndex : mchIds) {
+    for (const auto& [reducedMchTrackId, mchIndex] : orderedMchIds) {
+      (void)reducedMchTrackId;
       auto const& mchTrack = muonTracks.rawIteratorAt(mchIndex);
-      int mftMchMatchAttempts = getMftMchMatchAttempts(collisions, bcs, mchTrack, mftTracks);
+      int mftMchMatchAttempts = 0;
+      if (const auto& mchTrackInfoIt = collisionInfo.mchTracks.find(mchIndex); mchTrackInfoIt != collisionInfo.mchTracks.end()) {
+        mftMchMatchAttempts = mchTrackInfoIt->second.compatMftTracks.size();
+      }
       auto mchTrackAtVertex = VarManager::PropagateMuon(mchTrack, collision, VarManager::kToVertex);
+      auto mchTrackAtPlaneZ2 = propagateToZMch(mchTrack, o2::mft::constants::mft::LayerZCoordinate()[9]);
       bool isTagged = false;
       if (std::find(taggedMuons.begin(), taggedMuons.end(), mchIndex) != taggedMuons.end()) {
         isTagged = true;
@@ -3186,11 +3264,16 @@ struct QaMatching {
         static_cast<float>(mchTrack.pt()),
         static_cast<float>(mchTrack.eta()),
         static_cast<float>(mchTrack.phi()),
+        static_cast<float>(mchTrack.signed1Pt()),
+        static_cast<float>(mchTrack.tgl()),
         static_cast<int32_t>(mftMchMatchAttempts),
         isTagged,
         static_cast<float>(mchTrackAtVertex.getX()),
         static_cast<float>(mchTrackAtVertex.getY()),
         static_cast<float>(mchTrackAtVertex.getZ()),
+        static_cast<float>(mchTrackAtPlaneZ2.getX()),
+        static_cast<float>(mchTrackAtPlaneZ2.getY()),
+        static_cast<float>(mchTrackAtPlaneZ2.getZ()),
         static_cast<float>(mchTrackAtVertex.getPx()),
         static_cast<float>(mchTrackAtVertex.getPy()),
         static_cast<float>(mchTrackAtVertex.getPz()));
@@ -3219,7 +3302,7 @@ struct QaMatching {
     fillCollisions<true>(collisions, bcs, muonTracks, mftTracks, mftCovs, fCollisionInfos);
 
     for (auto const& [collisionIndex, collisionInfo] : fCollisionInfos) {
-      processCollision<true>(collisionInfo, collisions, bcs, muonTracks, mftTracks, mftCovs);
+      processCollision<true>(collisionInfo, collisions, muonTracks, mftTracks, mftCovs);
     }
   }
 
@@ -3246,7 +3329,7 @@ struct QaMatching {
     fillCollisions<false>(collisions, bcs, muonTracks, mftTracks, mftCovs, fCollisionInfos);
 
     for (auto const& [collisionIndex, collisionInfo] : fCollisionInfos) {
-      processCollision<false>(collisionInfo, collisions, bcs, muonTracks, mftTracks, mftCovs);
+      processCollision<false>(collisionInfo, collisions, muonTracks, mftTracks, mftCovs);
     }
   }
 
@@ -3273,7 +3356,7 @@ struct QaMatching {
     fillCollisions<false>(collisions, bcs, muonTracks, mftTracks, mftCovs, fCollisionInfos);
 
     for (auto const& [collisionIndex, collisionInfo] : fCollisionInfos) {
-      processCollision<false>(collisionInfo, collisions, bcs, muonTracks, mftTracks, mftCovs);
+      processCollision<false>(collisionInfo, collisions, muonTracks, mftTracks, mftCovs);
     }
   }
 
