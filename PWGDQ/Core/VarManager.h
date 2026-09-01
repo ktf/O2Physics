@@ -1117,8 +1117,16 @@ class VarManager : public TObject
 
     // ALICE 3 Variables
     kMultDensity,
-    kMultMCNParticlesEta40,
-    kMultMCNParticlesEta20,
+    kCent,
+    kMultPV,
+    kMultPVeta1,
+    kMultPVetaHalf,
+    kMultGlobalTracks,
+    kMultGlobalTracksPV,
+    kMultMCNParticlesAll,
+    kMultMCNParticlesEta25,
+    kMultMCNParticlesEta125,
+    kMultMCNParticlesEta09,
     kIsReconstructed,
     kNSiliconHits,
     kNTPCHits,
@@ -1460,7 +1468,7 @@ class VarManager : public TObject
   template <int pairType, uint32_t fillMap, typename T1, typename T2>
   static void FillPair(T1 const& t1, T2 const& t2, float* values = nullptr);
   template <int pairType, uint32_t fillMap, typename T1, typename T2>
-  static void FillPairRotation(T1 const& t1, T2 const& t2, float* values = nullptr);
+  static void FillPairRotation(T1 const& t1, T2 const& t2, int rotation, float* values = nullptr);
   template <int pairType, uint32_t fillMap, typename C, typename T1, typename T2>
   static void FillPairCollision(C const& collision, T1 const& t1, T2 const& t2, float* values = nullptr);
   template <int pairType, uint32_t fillMap, typename C, typename T1, typename T2, typename M, typename P>
@@ -4004,7 +4012,7 @@ void VarManager::FillPair(T1 const& t1, T2 const& t2, float* values)
 
 // change_start: rotation pair
 template <int pairType, uint32_t fillMap, typename T1, typename T2>
-void VarManager::FillPairRotation(T1 const& t1, T2 const& t2, float* values)
+void VarManager::FillPairRotation(T1 const& t1, T2 const& t2, int rotation, float* values)
 {
   if (!values) {
     values = fgValues;
@@ -4034,7 +4042,21 @@ void VarManager::FillPairRotation(T1 const& t1, T2 const& t2, float* values)
     m2 = o2::constants::physics::MassMuon;
   }
 
-  double rotationphi2 = SampleRotationPhi(t2.pt(), t2.eta(), t2.sign());
+  double rotationphi2 = t2.phi();
+
+  if (rotation == 1) {
+    rotationphi2 = t2.phi() + o2::constants::math::PI;
+  } else if (rotation == 2) {
+    rotationphi2 = 2 * values[kPsi2A] - t2.phi();
+  } else if (rotation == 3) {
+    rotationphi2 = 2 * values[kPsi2A] - t2.phi() + o2::constants::math::PI;
+  }
+
+  if (rotationphi2 >= o2::constants::math::TwoPI) {
+    rotationphi2 -= o2::constants::math::TwoPI;
+  } else if (rotationphi2 < 0) {
+    rotationphi2 += o2::constants::math::TwoPI;
+  }
 
   values[kCharge] = t1.sign() + t2.sign();
   values[kCharge1] = t1.sign();
@@ -7183,6 +7205,12 @@ void VarManager::FillEventAlice3(T const& event, float* values)
     values[kVtxChi2] = event.chi2();
     values[kCollisionTime] = event.collisionTime();
     values[kCollisionTimeRes] = event.collisionTimeRes();
+    values[kCent] = event.centRun2V0M();
+    values[kMultPV] = event.multNTracksPV();
+    values[kMultPVeta1] = event.multNTracksPVeta1();
+    values[kMultPVetaHalf] = event.multNTracksPVetaHalf();
+    values[kMultGlobalTracks] = event.multNTracksGlobal();
+    values[kMultGlobalTracksPV] = event.multNGlobalTracksPV();
   }
 
   if constexpr ((fillMap & ReducedEvent) > 0) {
@@ -7193,6 +7221,12 @@ void VarManager::FillEventAlice3(T const& event, float* values)
     values[kVtxNcontrib] = event.numContrib();
     values[kCollisionTime] = event.collisionTime();
     values[kCollisionTimeRes] = event.collisionTimeRes();
+    values[kCent] = event.centRun2V0M();
+    values[kMultPV] = event.multNTracksPV();
+    values[kMultPVeta1] = event.multNTracksPVeta1();
+    values[kMultPVetaHalf] = event.multNTracksPVetaHalf();
+    values[kMultGlobalTracks] = event.multNTracksGlobal();
+    values[kMultGlobalTracksPV] = event.multNGlobalTracksPV();
   }
   if constexpr ((fillMap & ReducedEventVtxCov) > 0) {
     values[kVtxCovXX] = event.covXX();
@@ -7213,6 +7247,10 @@ void VarManager::FillEventAlice3(T const& event, float* values)
     values[kMCEventTime] = event.t();
     values[kMCEventWeight] = event.weight();
     values[kMCEventImpParam] = event.impactParameter();
+    values[kMultMCNParticlesAll] = event.multMC();
+    values[kMultMCNParticlesEta25] = event.multMC25();
+    values[kMultMCNParticlesEta125] = event.multMC125();
+    values[kMultMCNParticlesEta09] = event.multMC09();
   }
 
   if constexpr ((fillMap & ReducedEventMC) > 0) {
@@ -7224,6 +7262,10 @@ void VarManager::FillEventAlice3(T const& event, float* values)
     values[kMCEventTime] = event.t();
     values[kMCEventWeight] = event.weight();
     values[kMCEventImpParam] = event.impactParameter();
+    values[kMultMCNParticlesAll] = event.multMC();
+    values[kMultMCNParticlesEta25] = event.multMC25();
+    values[kMultMCNParticlesEta125] = event.multMC125();
+    values[kMultMCNParticlesEta09] = event.multMC09();
   }
 }
 
