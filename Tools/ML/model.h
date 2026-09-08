@@ -520,13 +520,29 @@ class OnnxModel
       const char* dim = "N";
       bool scalar = false;
       switch (pin.type) {
-        case PreprocInput::Type::TrackFloat: et = onnx::TensorProto::FLOAT; break;
-        case PreprocInput::Type::TrackInt32: et = onnx::TensorProto::INT32; break;
-        case PreprocInput::Type::TrackUint8: et = onnx::TensorProto::UINT8; break;
-        case PreprocInput::Type::TrackInt8: et = onnx::TensorProto::INT8; break;
-        case PreprocInput::Type::TrackBool: et = onnx::TensorProto::BOOL; break;
-        case PreprocInput::Type::CollisionFloat: et = onnx::TensorProto::FLOAT; dim = "C"; break;
-        case PreprocInput::Type::ScalarFloat: et = onnx::TensorProto::FLOAT; scalar = true; break;
+        case PreprocInput::Type::TrackFloat:
+          et = onnx::TensorProto::FLOAT;
+          break;
+        case PreprocInput::Type::TrackInt32:
+          et = onnx::TensorProto::INT32;
+          break;
+        case PreprocInput::Type::TrackUint8:
+          et = onnx::TensorProto::UINT8;
+          break;
+        case PreprocInput::Type::TrackInt8:
+          et = onnx::TensorProto::INT8;
+          break;
+        case PreprocInput::Type::TrackBool:
+          et = onnx::TensorProto::BOOL;
+          break;
+        case PreprocInput::Type::CollisionFloat:
+          et = onnx::TensorProto::FLOAT;
+          dim = "C";
+          break;
+        case PreprocInput::Type::ScalarFloat:
+          et = onnx::TensorProto::FLOAT;
+          scalar = true;
+          break;
       }
       tt->set_elem_type(et);
       auto* sh = tt->mutable_shape();
