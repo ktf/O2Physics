@@ -195,10 +195,10 @@ pre-existing behaviour — every distinct timestamp may yield a different object
 
 Pick it from the object's real validity, and only then:
 
-| Object changes ... | Uniformity | Declare with |
-| --- | --- | --- |
-| within a run (calibrations, drift velocity) | timestamp (default) | `DECLARE_SOA_TIMESTAMPED_TABLE` |
-| per run or per period (geometry, material, per-period calibrations) | `aod::BCs` / `aod::bc::RunNumber` | `DECLARE_SOA_UNIFORM_TABLE` |
+| Object changes ...                                                  | Uniformity                        | Declare with                    |
+|---------------------------------------------------------------------|-----------------------------------|---------------------------------|
+| within a run (calibrations, drift velocity)                         | timestamp (default)               | `DECLARE_SOA_TIMESTAMPED_TABLE` |
+| per run or per period (geometry, material, per-period calibrations) | `aod::BCs` / `aod::bc::RunNumber` | `DECLARE_SOA_UNIFORM_TABLE`     |
 
 Worked examples in the tree: `aod::TpcCalibCCDBObjects` keeps the timestamp default because
 the TPC drift velocity genuinely varies within a run; `aod::GeomCCDBObjects` and
