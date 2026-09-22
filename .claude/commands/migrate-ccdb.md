@@ -195,10 +195,10 @@ pre-existing behaviour — every distinct timestamp may yield a different object
 
 Pick it from the object's real validity, and only then:
 
-| Object changes ... | Uniformity | Declare with |
-| --- | --- | --- |
-| within a run (calibrations, drift velocity) | timestamp (default) | `DECLARE_SOA_TIMESTAMPED_TABLE` |
-| per run or per period (geometry, material, per-period calibrations) | `aod::BCs` / `aod::bc::RunNumber` | `DECLARE_SOA_UNIFORM_TABLE` |
+| Object changes ...                                                  | Uniformity                        | Declare with                    |
+|---------------------------------------------------------------------|-----------------------------------|---------------------------------|
+| within a run (calibrations, drift velocity)                         | timestamp (default)               | `DECLARE_SOA_TIMESTAMPED_TABLE` |
+| per run or per period (geometry, material, per-period calibrations) | `aod::BCs` / `aod::bc::RunNumber` | `DECLARE_SOA_UNIFORM_TABLE`     |
 
 Worked examples in the tree: `aod::TpcCalibCCDBObjects` keeps the timestamp default because
 the TPC drift velocity genuinely varies within a run; `aod::GeomCCDBObjects` and
@@ -297,12 +297,12 @@ The fetcher downloads once into a shm cache and the column stores `(handle, segm
 
 Measured on `propagationServiceV2` (`HF_LHC23_pass4_Thin_small_2P3PDstar`, `daily-20260922-0000-1`), migrated wagon 61527 against un-migrated baseline wagon 61526:
 
-| | baseline 766059 | migrated 766456 |
-| --- | --- | --- |
-| propagation device `cpuUsedAbsolute` | 3,972,078 | 2,866,181 (**−28 %**) |
-| propagation device peak PSS | 160 MB | 168 MB |
-| train peak PSS | 1340 MB | 1366 MB |
-| CCDB queries from the task device | 3.03 MB fetched | 0 — all via the fetcher |
+|                                      | baseline 766059 | migrated 766456         |
+|--------------------------------------|-----------------|-------------------------|
+| propagation device `cpuUsedAbsolute` | 3,972,078       | 2,866,181 (**−28 %**)   |
+| propagation device peak PSS          | 160 MB          | 168 MB                  |
+| train peak PSS                       | 1340 MB         | 1366 MB                 |
+| CCDB queries from the task device    | 3.03 MB fetched | 0 — all via the fetcher |
 
 Quote the CPU number when justifying a migration; do not promise memory.
 
