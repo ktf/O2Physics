@@ -72,3 +72,19 @@ o2physics_add_library(FITCutParHolder
 o2physics_target_root_dictionary(FITCutParHolder
                                  HEADERS FITCutParHolder.h
                                  LINKDEF FITCutParHolderLinkDef.h)
+# Precompiled header shared across PWGUD. Percentages are the share of the
+# group's workflow translation units that include the header, measured over the tree.
+# UDTables.h is the group's single shared data model.
+#
+# runDataProcessing.h is deliberately NOT precompiled: it requires each workflow's
+# customize() to be declared before it is included, so precompiling it silently
+# unregisters every option (the binary aborts at --dump-workflow, but links fine).
+#
+# Skipped under recc, which caches compilations remotely instead.
+add_library(UDTablesPCH OBJECT udTablesPCH.cxx)
+target_link_libraries(UDTablesPCH PUBLIC O2::Framework O2Physics::AnalysisCore)
+if(NOT DEFINED ENV{USE_RECC})
+  target_precompile_headers(UDTablesPCH PRIVATE
+    [["PWGUD/DataModel/UDTables.h"]]           # 79%, ~650 lines
+  )
+endif()
